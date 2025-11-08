@@ -102,7 +102,7 @@ export async function POST(request: NextRequest) {
     console.log(`\n🔍 开始搜索所有视频源: ${title}`);
 
     // 从数据库读取视频源配置
-    const allSources: VodSource[] = getVodSourcesFromDB();
+    const allSources: VodSource[] = await getVodSourcesFromDB();
     
     if (allSources.length === 0) {
       return NextResponse.json(

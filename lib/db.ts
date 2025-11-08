@@ -1,67 +1,70 @@
-import Database from 'better-sqlite3';
-import path from 'path';
-import fs from 'fs';
+import { MongoClient, Db } from 'mongodb';
 
-// 确保 data 目录存在
-// 在 Vercel 等 serverless 环境中使用 /tmp 目录，因为其他目录是只读的
-const isVercel = process.env.VERCEL === '1';
-const dataDir = isVercel ? '/tmp' : path.join(process.cwd(), 'data');
+// MongoDB 连接
+let client: MongoClient | null = null;
+let db: Db | null = null;
 
-if (!isVercel && !fs.existsSync(dataDir)) {
-  fs.mkdirSync(dataDir, { recursive: true });
-}
-
-// 数据库文件路径
-const dbPath = path.join(dataDir, 'app.db');
-
-// 创建或连接数据库
-let db: Database.Database | null = null;
-
-export function getDatabase(): Database.Database {
-  if (!db) {
-    db = new Database(dbPath, { verbose: console.log });
-    initializeDatabase(db);
+// 获取 MongoDB 连接 URI
+function getMongoURI(): string {
+  const uri = process.env.MONGODB_URI;
+  if (!uri) {
+    throw new Error('MONGODB_URI 环境变量未设置');
   }
-  return db;
+  return uri;
 }
 
-// 初始化数据库表
-function initializeDatabase(db: Database.Database) {
-  // 创建视频源配置表
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS vod_sources (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      key TEXT UNIQUE NOT NULL,
-      name TEXT NOT NULL,
-      api TEXT NOT NULL,
-      play_url TEXT NOT NULL,
-      type TEXT NOT NULL DEFAULT 'json',
-      enabled INTEGER NOT NULL DEFAULT 1,
-      sort_order INTEGER NOT NULL DEFAULT 0,
-      created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
-      updated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
-    );
+// 获取数据库实例
+export async function getDatabase(): Promise<Db> {
+  if (db) {
+    return db;
+  }
 
-    CREATE INDEX IF NOT EXISTS idx_vod_sources_enabled ON vod_sources(enabled);
-    CREATE INDEX IF NOT EXISTS idx_vod_sources_sort ON vod_sources(sort_order);
-  `);
+  try {
+    const uri = getMongoURI();
+    client = new MongoClient(uri);
+    await client.connect();
+    
+    // 从 URI 中提取数据库名，或使用默认名称
+    const dbName = process.env.MONGODB_DB_NAME || 'kerkerker';
+    db = client.db(dbName);
+    
+    // 初始化数据库集合和索引
+    await initializeDatabase(db);
+    
+    console.log('✅ MongoDB 连接成功');
+    return db;
+  } catch (error) {
+    console.error('❌ MongoDB 连接失败:', error);
+    throw error;
+  }
+}
 
-  // 创建选中的视频源配置表（单条记录）
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS vod_source_selection (
-      id INTEGER PRIMARY KEY CHECK (id = 1),
-      selected_key TEXT,
-      updated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
-    );
-  `);
+// 初始化数据库集合和索引
+async function initializeDatabase(db: Db) {
+  try {
+    // 创建 vod_sources 集合的索引
+    const vodSourcesCollection = db.collection('vod_sources');
+    await vodSourcesCollection.createIndex({ key: 1 }, { unique: true });
+    await vodSourcesCollection.createIndex({ enabled: 1 });
+    await vodSourcesCollection.createIndex({ sort_order: 1 });
 
-  console.log('✅ 数据库初始化完成');
+    // 创建 vod_source_selection 集合的索引
+    const selectionCollection = db.collection('vod_source_selection');
+    await selectionCollection.createIndex({ id: 1 }, { unique: true });
+
+    console.log('✅ MongoDB 数据库初始化完成');
+  } catch (error) {
+    console.error('⚠️ 数据库初始化警告:', error);
+    // 不抛出错误，因为索引可能已经存在
+  }
 }
 
 // 关闭数据库连接
-export function closeDatabase() {
-  if (db) {
-    db.close();
+export async function closeDatabase() {
+  if (client) {
+    await client.close();
+    client = null;
     db = null;
+    console.log('✅ MongoDB 连接已关闭');
   }
 }

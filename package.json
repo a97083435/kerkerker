@@ -11,18 +11,17 @@
   "dependencies": {
     "@octokit/rest": "^22.0.1",
     "axios": "^1.13.2",
-    "better-sqlite3": "^12.4.1",
     "clsx": "^2.1.1",
     "dotenv": "^17.2.3",
     "https-proxy-agent": "^7.0.6",
     "lucide-react": "^0.553.0",
+    "mongodb": "^7.0.0",
     "next": "16.0.1",
     "react": "19.2.0",
     "react-dom": "19.2.0"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
-    "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",

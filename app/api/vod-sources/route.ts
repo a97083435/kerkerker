@@ -15,7 +15,7 @@ export async function GET(request: NextRequest) {
     const includeDisabled = searchParams.get('all') === 'true';
     
     if (includeDisabled) {
-      const allSources = getAllVodSourcesFromDB();
+      const allSources = await getAllVodSourcesFromDB();
       return NextResponse.json({
         code: 200,
         message: '获取成功',
@@ -23,8 +23,8 @@ export async function GET(request: NextRequest) {
       });
     }
     
-    const sources = getVodSourcesFromDB();
-    const selectedSource = getSelectedVodSourceFromDB();
+    const sources = await getVodSourcesFromDB();
+    const selectedSource = await getSelectedVodSourceFromDB();
     
     return NextResponse.json({
       code: 200,
@@ -71,11 +71,11 @@ export async function POST(request: NextRequest) {
     }
     
     // 保存视频源
-    saveVodSourcesToDB(sources as VodSource[]);
+    await saveVodSourcesToDB(sources as VodSource[]);
     
     // 保存选中的视频源
     if (selected && typeof selected === 'string') {
-      saveSelectedVodSourceToDB(selected);
+      await saveSelectedVodSourceToDB(selected);
     }
     
     return NextResponse.json({
@@ -109,7 +109,7 @@ export async function PUT(request: NextRequest) {
       );
     }
     
-    saveSelectedVodSourceToDB(selected);
+    await saveSelectedVodSourceToDB(selected);
     
     return NextResponse.json({
       code: 200,
