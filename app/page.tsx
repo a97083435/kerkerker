@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { Play, Film, Tv, Drama, Clapperboard, Palette, BookOpen, Star } from "lucide-react";
+import { Play, Film, Tv, Drama, Clapperboard, Palette, BookOpen, Star, ChevronLeft, ChevronRight } from "lucide-react";
 import DoubanCard from "@/components/DoubanCard";
 import { DoubanMovie } from "@/types/douban";
 import { Toast } from "@/components/Toast";
@@ -31,13 +31,14 @@ export default function HomePage() {
   // 所有分类数据
   const [categories, setCategories] = useState<CategoryData[]>([]);
   const [top250Movies, setTop250Movies] = useState<DoubanMovie[]>([]);
-  const [heroMovie, setHeroMovie] = useState<DoubanMovie | null>(null);
-  const [heroData, setHeroData] = useState<{
+  const [heroMovies, setHeroMovies] = useState<DoubanMovie[]>([]);
+  const [heroDataList, setHeroDataList] = useState<Array<{
     poster_horizontal: string;
     poster_vertical: string;
     description?: string;
     genres?: string[];
-  } | null>(null);
+  }>>([]);
+  const [currentHeroIndex, setCurrentHeroIndex] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [matchingMovie, setMatchingMovie] = useState<string | null>(null);
@@ -83,10 +84,21 @@ export default function HomePage() {
         top250Res.json(),
       ]);
 
-      // 处理 Hero Banner 数据
-      if (heroApiData.code === 200 && heroApiData.data) {
-        const hero = heroApiData.data;
-        setHeroMovie({
+      // 处理 Hero Banner 数据（现在是数组）
+      if (heroApiData.code === 200 && heroApiData.data && Array.isArray(heroApiData.data)) {
+        const heroes = heroApiData.data;
+        const heroMoviesList = heroes.map((hero: {
+          id: string;
+          title: string;
+          cover: string;
+          url: string;
+          rate: string;
+          episode_info?: string;
+          poster_horizontal: string;
+          poster_vertical: string;
+          description?: string;
+          genres?: string[];
+        }) => ({
           id: hero.id,
           title: hero.title,
           cover: hero.cover || "",
@@ -97,15 +109,22 @@ export default function HomePage() {
           cover_y: 0,
           playable: false,
           is_new: false,
-        });
+        }));
 
-        // 存储额外的 Hero 数据（海报、描述等）
-        setHeroData({
+        const heroDataArray = heroes.map((hero: {
+          poster_horizontal: string;
+          poster_vertical: string;
+          description?: string;
+          genres?: string[];
+        }) => ({
           poster_horizontal: hero.poster_horizontal,
           poster_vertical: hero.poster_vertical,
           description: hero.description,
           genres: hero.genres,
-        });
+        }));
+
+        setHeroMovies(heroMoviesList);
+        setHeroDataList(heroDataArray);
       }
 
       // 处理新 API 数据（9个分类）
@@ -130,6 +149,34 @@ export default function HomePage() {
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  // 自动轮播 Hero
+  useEffect(() => {
+    if (heroMovies.length <= 1) return;
+
+    const timer = setInterval(() => {
+      setCurrentHeroIndex((prevIndex) => (prevIndex + 1) % heroMovies.length);
+    }, 5000); // 每5秒切换一次
+
+    return () => clearInterval(timer);
+  }, [heroMovies.length]);
+
+  // 手动切换 Hero
+  const goToHero = (index: number) => {
+    setCurrentHeroIndex(index);
+  };
+
+  const goToPrevHero = () => {
+    setCurrentHeroIndex((prevIndex) => 
+      prevIndex === 0 ? heroMovies.length - 1 : prevIndex - 1
+    );
+  };
+
+  const goToNextHero = () => {
+    setCurrentHeroIndex((prevIndex) => 
+      (prevIndex + 1) % heroMovies.length
+    );
+  };
 
   // 搜索跳转
   const handleSearch = async () => {
@@ -511,137 +558,181 @@ export default function HomePage() {
         </div>
       ) : (
         <>
-          {/* Hero Banner - 响应式海报 */}
-          {heroMovie && heroData ? (
-            <div className="relative w-full">
-              {/* 海报容器 */}
-              <div className="relative w-full h-[60vh] sm:h-[65vh] md:h-[70vh] lg:h-[75vh]">
-                {/* 移动端：9:16 竖向海报 */}
-                <img
-                  src={getImageUrl(heroData.poster_vertical)}
-                  alt={heroMovie.title}
-                  className="block md:hidden absolute inset-0 w-full h-full object-cover object-center"
-                />
+          {/* Hero Banner - 轮播海报 */}
+          {heroMovies.length > 0 && heroDataList.length > 0 ? (
+            <div className="relative w-full group">
+              {/* 海报容器 - 使用固定宽高比 */}
+              <div className="relative w-full aspect-[3/4] md:aspect-[12/5] overflow-hidden">
+                {/* 轮播图片 */}
+                {heroMovies.map((movie, index) => {
+                  const heroData = heroDataList[index];
+                  const isActive = index === currentHeroIndex;
+                  
+                  return (
+                    <div
+                      key={movie.id}
+                      className={`absolute inset-0 transition-opacity duration-700 ${
+                        isActive ? 'opacity-100 z-10' : 'opacity-0 z-0'
+                      }`}
+                    >
+                      {/* 移动端：9:16 竖向海报 */}
+                      <img
+                        src={getImageUrl(heroData.poster_vertical)}
+                        alt={movie.title}
+                        className="block md:hidden absolute inset-0 w-full h-full object-cover bg-black"
+                      />
 
-                {/* PC端：16:9 横向海报 */}
-                <img
-                  src={getImageUrl(heroData.poster_horizontal)}
-                  alt={heroMovie.title}
-                  className="hidden md:block absolute inset-0 w-full h-full object-cover object-center"
-                />
+                      {/* PC端：16:9 横向海报 */}
+                      <img
+                        src={getImageUrl(heroData.poster_horizontal)}
+                        alt={movie.title}
+                        className="hidden md:block absolute inset-0 w-full h-full object-cover bg-black"
+                      />
+ 
+                      {/* 渐变遮罩 */}
+                      <div className="absolute inset-0 bg-gradient-to-t md:bg-gradient-to-r from-black/95 via-black/70 md:via-black/50 to-transparent" />
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-transparent to-transparent" />
 
-                {/* 右侧悬浮海报卡片 - 仅PC端显示 */}
-                <div className="hidden lg:block absolute top-28 right-8 xl:right-16 z-10">
-                  <div className="relative group">
-                    <img
-                      src={getImageUrl(heroData.poster_vertical)}
-                      alt={heroMovie.title}
-                      className="w-44 xl:w-62 rounded-lg shadow-2xl ring-1 ring-white/10 transform transition-transform duration-300 group-hover:scale-105"
-                    />
-                    {/* 光晕效果 */}
-                    <div className="absolute -inset-2 bg-gradient-to-b from-red-500/20 to-purple-500/20 rounded-lg blur-xl opacity-0 group-hover:opacity-100 transition-opacity duration-300 -z-10" />
-                  </div>
-                </div>
-                {/* 渐变遮罩 */}
-                <div className="absolute inset-0 bg-gradient-to-t md:bg-gradient-to-r from-black/95 via-black/70 md:via-black/50 to-transparent" />
-                <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-transparent to-transparent" />
+                      {/* 内容 */}
+                      <div className="absolute inset-0 flex items-end">
+                        <div className="w-full px-4 md:px-12 pb-8 md:pb-12 lg:pb-16">
+                          <div className="max-w-3xl">
+                            <h1 className="text-3xl sm:text-4xl md:text-5xl lg:text-6xl font-bold text-white mb-3 md:mb-4 leading-tight drop-shadow-2xl">
+                              {movie.title}
+                            </h1>
 
-                {/* 内容 */}
-                <div className="absolute inset-0 flex items-end">
-                  <div className="w-full px-4 md:px-12 pb-8 md:pb-12 lg:pb-16">
-                    <div className="max-w-3xl">
-                      <h1 className="text-3xl sm:text-4xl md:text-5xl lg:text-6xl font-bold text-white mb-3 md:mb-4 leading-tight drop-shadow-2xl">
-                        {heroMovie.title}
-                      </h1>
+                            {/* 评分、类型和剧集信息 */}
+                            <div className="flex flex-wrap items-center gap-2 mb-3 md:mb-4">
+                              {movie.rate && (
+                                <div className="flex items-center space-x-1 text-yellow-400 bg-black/40 px-2.5 py-1 rounded-full backdrop-blur-sm">
+                                  <svg
+                                    className="w-4 h-4"
+                                    fill="currentColor"
+                                    viewBox="0 0 20 20"
+                                  >
+                                    <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
+                                  </svg>
+                                  <span className="font-bold text-sm">
+                                    {movie.rate}
+                                  </span>
+                                </div>
+                              )}
 
-                      {/* 评分、类型和剧集信息 */}
-                      <div className="flex flex-wrap items-center gap-2 mb-3 md:mb-4">
-                        {heroMovie.rate && (
-                          <div className="flex items-center space-x-1 text-yellow-400 bg-black/40 px-2.5 py-1 rounded-full backdrop-blur-sm">
-                            <svg
-                              className="w-4 h-4"
-                              fill="currentColor"
-                              viewBox="0 0 20 20"
-                            >
-                              <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
-                            </svg>
-                            <span className="font-bold text-sm">
-                              {heroMovie.rate}
-                            </span>
-                          </div>
-                        )}
+                              {heroData.genres && heroData.genres.length > 0 && (
+                                <>
+                                  {heroData.genres.slice(0, 3).map((genre: string, idx: number) => (
+                                    <span
+                                      key={idx}
+                                      className="text-xs text-gray-200 bg-white/10 px-2.5 py-1 rounded-full backdrop-blur-sm"
+                                    >
+                                      {genre}
+                                    </span>
+                                  ))}
+                                </>
+                              )}
 
-                        {heroData.genres && heroData.genres.length > 0 && (
-                          <>
-                            {heroData.genres.slice(0, 3).map((genre, index) => (
-                              <span
-                                key={index}
-                                className="text-xs text-gray-200 bg-white/10 px-2.5 py-1 rounded-full backdrop-blur-sm"
+                              {movie.episode_info && (
+                                <span className="text-xs text-gray-200 bg-white/10 px-2.5 py-1 rounded-full backdrop-blur-sm">
+                                  {movie.episode_info}
+                                </span>
+                              )}
+                            </div>
+
+                            {/* 电影描述 - 仅PC端显示 */}
+                            {heroData.description && (
+                              <p className="hidden md:block text-sm text-gray-200 mb-4 line-clamp-2 leading-relaxed max-w-2xl">
+                                {heroData.description}
+                              </p>
+                            )}
+
+                            {/* 操作按钮 */}
+                            <div className="flex items-center gap-3">
+                              <button
+                                onClick={() => handleMovieClick(movie)}
+                                className="flex items-center gap-2 bg-white text-black px-6 md:px-8 py-3 md:py-3.5 rounded-lg font-bold hover:bg-opacity-90 hover:scale-105 transition-all duration-200 text-sm md:text-base shadow-2xl"
                               >
-                                {genre}
-                              </span>
-                            ))}
-                          </>
-                        )}
-
-                        {heroMovie.episode_info && (
-                          <span className="text-xs text-gray-200 bg-white/10 px-2.5 py-1 rounded-full backdrop-blur-sm">
-                            {heroMovie.episode_info}
-                          </span>
-                        )}
-                      </div>
-
-                      {/* 电影描述 - 仅PC端显示 */}
-                      {heroData.description && (
-                        <p className="hidden md:block text-sm text-gray-200 mb-4 line-clamp-2 leading-relaxed max-w-2xl">
-                          {heroData.description}
-                        </p>
-                      )}
-
-                      {/* 操作按钮 */}
-                      <div className="flex items-center gap-3">
-                        <button
-                          onClick={() => handleMovieClick(heroMovie)}
-                          className="flex items-center gap-2 bg-white text-black px-6 md:px-8 py-3 md:py-3.5 rounded-lg font-bold hover:bg-opacity-90 hover:scale-105 transition-all duration-200 text-sm md:text-base shadow-2xl"
-                        >
-                          <Play className="w-5 h-5 md:w-6 md:h-6 fill-current" />
-                          <span>立即播放</span>
-                        </button>
+                                <Play className="w-5 h-5 md:w-6 md:h-6 fill-current" />
+                                <span>立即播放</span>
+                              </button>
+                            </div>
+                          </div>
+                        </div>
                       </div>
                     </div>
-                  </div>
+                  );
+                })}
+
+                {/* 左右导航按钮 - 仅悬停时显示 */}
+                <button
+                  onClick={goToPrevHero}
+                  className="hidden md:flex absolute left-4 top-1/2 -translate-y-1/2 z-20 w-12 h-12 items-center justify-center bg-black/50 hover:bg-black/70 text-white rounded-full backdrop-blur-sm transition-all duration-300 hover:scale-110 opacity-0 group-hover:opacity-100"
+                  aria-label="上一个"
+                >
+                  <ChevronLeft className="w-6 h-6" />
+                </button>
+                <button
+                  onClick={goToNextHero}
+                  className="hidden md:flex absolute right-4 top-1/2 -translate-y-1/2 z-20 w-12 h-12 items-center justify-center bg-black/50 hover:bg-black/70 text-white rounded-full backdrop-blur-sm transition-all duration-300 hover:scale-110 opacity-0 group-hover:opacity-100"
+                  aria-label="下一个"
+                >
+                  <ChevronRight className="w-6 h-6" />
+                </button>
+
+                {/* 指示器 */}
+                <div className="absolute hidden md:flex bottom-6 left-1/2 -translate-x-1/2 z-20 items-center gap-2">
+                  {heroMovies.map((_, index) => (
+                    <button
+                      key={index}
+                      onClick={() => goToHero(index)}
+                      className={`transition-all duration-300 ${
+                        index === currentHeroIndex
+                          ? 'w-8 h-2 bg-white'
+                          : 'w-2 h-2 bg-white/50 hover:bg-white/75'
+                      } rounded-full`}
+                      aria-label={`跳转到第 ${index + 1} 个`}
+                    />
+                  ))}
                 </div>
               </div>
             </div>
           ) : (
-            /* Hero 占位 */
-            <div className="relative h-[56vh] sm:h-[60vh] md:h-[70vh] lg:h-[75vh] w-full overflow-hidden bg-gradient-to-br from-gray-900 via-gray-800 to-black">
-              <div className="absolute bottom-0 left-0 right-0 px-4 md:px-12 pb-12 md:pb-20">
-                <div className="max-w-2xl">
-                  <div className="flex items-center space-x-3 mb-4">
-                    <div className="w-16 h-16 bg-gray-700 rounded-lg flex items-center justify-center">
-                      <svg
-                        className="w-8 h-8 text-gray-500"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                        stroke="currentColor"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M7 4v16M17 4v16M3 8h4m10 0h4M3 12h18M3 16h4m10 0h4M4 20h16a1 1 0 001-1V5a1 1 0 00-1-1H4a1 1 0 00-1 1v14a1 1 0 001 1z"
-                        />
-                      </svg>
+            /* Hero 骨架屏 - 使用固定宽高比 */
+            <div className="relative w-full aspect-[9/16] md:aspect-[16/9] overflow-hidden bg-gradient-to-br from-gray-900 via-gray-800 to-black animate-pulse">
+              {/* 渐变遮罩 */}
+              <div className="absolute inset-0 bg-gradient-to-t md:bg-gradient-to-r from-black/95 via-black/70 md:via-black/50 to-transparent" />
+              <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-transparent to-transparent" />
+              
+              {/* 内容骨架 */}
+              <div className="absolute inset-0 flex items-end">
+                <div className="w-full px-4 md:px-12 pb-8 md:pb-12 lg:pb-16">
+                  <div className="max-w-3xl space-y-4">
+                    {/* 标题骨架 */}
+                    <div className="h-12 md:h-16 bg-gray-700/50 rounded-lg w-3/4 animate-pulse" />
+                    
+                    {/* 标签骨架 */}
+                    <div className="flex gap-2">
+                      <div className="h-6 w-16 bg-gray-700/50 rounded-full animate-pulse" />
+                      <div className="h-6 w-20 bg-gray-700/50 rounded-full animate-pulse" />
+                      <div className="h-6 w-24 bg-gray-700/50 rounded-full animate-pulse" />
                     </div>
-                    <div>
-                      <h2 className="text-3xl md:text-4xl font-bold text-white mb-1">
-                        欢迎使用壳儿
-                      </h2>
-                      <p className="text-gray-400 text-sm">发现更多精彩内容</p>
+                    
+                    {/* 描述骨架 */}
+                    <div className="hidden md:block space-y-2">
+                      <div className="h-4 bg-gray-700/50 rounded w-full animate-pulse" />
+                      <div className="h-4 bg-gray-700/50 rounded w-5/6 animate-pulse" />
                     </div>
+                    
+                    {/* 按钮骨架 */}
+                    <div className="h-12 w-36 bg-gray-700/50 rounded-lg animate-pulse" />
                   </div>
                 </div>
+              </div>
+              
+              {/* 指示器骨架 */}
+              <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex gap-2">
+                {[...Array(5)].map((_, i) => (
+                  <div key={i} className="w-2 h-2 bg-gray-700/50 rounded-full animate-pulse" />
+                ))}
               </div>
             </div>
           )}
