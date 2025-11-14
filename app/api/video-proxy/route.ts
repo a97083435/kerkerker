@@ -20,18 +20,25 @@ export async function GET(request: NextRequest) {
 
     console.log(`🎬 代理视频请求: ${videoUrl}`);
 
-    // 发起视频请求
+    // 准备请求头 - 模拟真实浏览器
     const fetchHeaders: HeadersInit = {
-      'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
+      'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
       'Accept': '*/*',
+      'Accept-Encoding': 'identity',
+      'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+      'Connection': 'keep-alive',
+      'Sec-Fetch-Dest': 'empty',
+      'Sec-Fetch-Mode': 'cors',
+      'Sec-Fetch-Site': 'cross-site',
     };
     
-    // 添加 Referer（如果 URL 有效）
+    // 添加 Referer - 使用同域名的根路径
     try {
       const urlObj = new URL(videoUrl);
-      fetchHeaders['Referer'] = urlObj.origin;
-    } catch {
-      console.warn('无效的 URL，跳过 Referer');
+      fetchHeaders['Referer'] = `${urlObj.protocol}//${urlObj.host}/`;
+      fetchHeaders['Origin'] = `${urlObj.protocol}//${urlObj.host}`;
+    } catch (e) {
+      console.warn('设置Referer失败:', e);
     }
     
     // 添加 Range 头（如果存在）
@@ -40,15 +47,32 @@ export async function GET(request: NextRequest) {
       fetchHeaders['Range'] = rangeHeader;
     }
     
+    console.log('🔧 请求headers:', JSON.stringify(fetchHeaders, null, 2));
+    
     const videoResponse = await fetch(videoUrl, {
       headers: fetchHeaders,
       signal: AbortSignal.timeout(30000)
     });
 
-    if (!videoResponse.ok) {
-      console.error(`视频请求失败: ${videoResponse.status}`);
+    if (!videoResponse.ok && videoResponse.status !== 206) {
+      console.error(`❌ 视频请求失败: ${videoResponse.status} ${videoResponse.statusText}`);
+      console.error('❌ 目标URL:', videoUrl);
+      console.error('❌ 响应headers:', JSON.stringify(Object.fromEntries(videoResponse.headers.entries()), null, 2));
+      
+      // 尝试读取错误响应体
+      try {
+        const errorText = await videoResponse.text();
+        console.error('❌ 错误响应内容:', errorText.substring(0, 500));
+      } catch (e) {
+        console.error('❌ 无法读取错误响应:', e);
+      }
+      
       return NextResponse.json(
-        { code: videoResponse.status, message: '视频请求失败' },
+        { 
+          code: videoResponse.status,
+          message: `视频请求失败: ${videoResponse.status} ${videoResponse.statusText}`,
+          suggestion: videoResponse.status === 403 ? '目标站点拒绝访问，可能需要特定的cookies或认证' : undefined
+        },
         { status: videoResponse.status }
       );
     }
@@ -126,27 +150,39 @@ function rewriteM3U8(content: string, baseUrl: string, proxyOrigin: string): str
   const baseUrlObj = new URL(baseUrl);
   const baseDir = baseUrl.substring(0, baseUrl.lastIndexOf('/') + 1);
   
+  // 辅助函数：将相对URL转换为绝对URL
+  const resolveUrl = (url: string): string => {
+    if (url.startsWith('http://') || url.startsWith('https://')) {
+      return url;
+    }
+    if (url.startsWith('/')) {
+      return `${baseUrlObj.protocol}//${baseUrlObj.host}${url}`;
+    }
+    return baseDir + url;
+  };
+  
   const rewrittenLines = lines.map(line => {
-    // 跳过注释行和空行
+    // 处理 #EXT-X-KEY 标签中的 URI
+    if (line.startsWith('#EXT-X-KEY:')) {
+      // 匹配 URI="..." 或 URI='...' 或 URI=...
+      const uriMatch = line.match(/URI=["']?([^"',]+)["']?/);
+      if (uriMatch && uriMatch[1]) {
+        const originalUri = uriMatch[1];
+        const absoluteUri = resolveUrl(originalUri);
+        const proxiedUri = `${proxyOrigin}/api/video-proxy?url=${encodeURIComponent(absoluteUri)}`;
+        // 替换原始URI为代理URI
+        return line.replace(/URI=["']?[^"',]+["']?/, `URI="${proxiedUri}"`);
+      }
+      return line;
+    }
+    
+    // 跳过其他注释行和空行
     if (line.startsWith('#') || line.trim() === '') {
       return line;
     }
     
-    // 处理资源 URL
-    let resourceUrl = line.trim();
-    
-    // 如果是相对路径，转换为绝对路径
-    if (!resourceUrl.startsWith('http://') && !resourceUrl.startsWith('https://')) {
-      if (resourceUrl.startsWith('/')) {
-        // 绝对路径（相对于域名根目录）
-        resourceUrl = `${baseUrlObj.protocol}//${baseUrlObj.host}${resourceUrl}`;
-      } else {
-        // 相对路径（相对于当前目录）
-        resourceUrl = baseDir + resourceUrl;
-      }
-    }
-    
-    // 将资源 URL 替换为代理 URL
+    // 处理资源 URL（.ts 片段等）
+    const resourceUrl = resolveUrl(line.trim());
     const proxiedUrl = `${proxyOrigin}/api/video-proxy?url=${encodeURIComponent(resourceUrl)}`;
     
     return proxiedUrl;

@@ -49,6 +49,7 @@ export function LocalHlsPlayer({
   const [error, setError] = useState<PlayerError | null>(null);
   const [isClient, setIsClient] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
+  const [useDirectPlay, setUseDirectPlay] = useState(false);
   
   const containerRef = useRef<HTMLDivElement>(null);
   const artRef = useRef<Artplayer | null>(null);
@@ -71,8 +72,10 @@ export function LocalHlsPlayer({
   const getProxiedUrl = useCallback((url: string) => {
     if (!url) return '';
     if (url.startsWith('/api/video-proxy/')) return url;
+    // 如果启用了直接播放模式，直接返回原始URL
+    if (useDirectPlay) return url;
     return `/api/video-proxy/${encodeURIComponent(url)}`;
-  }, []);
+  }, [useDirectPlay]);
 
   // 设置错误状态
   const setPlayerError = useCallback((type: ErrorType, message: string, canRetry: boolean = false) => {
@@ -184,7 +187,7 @@ export function LocalHlsPlayer({
               });
 
               // 错误处理
-              hls.on(Hls.Events.ERROR, (_event: string, data: HlsErrorData) => {
+              hls.on(Hls.Events.ERROR, async (_event: string, data: HlsErrorData) => {
                 // 处理密钥加载错误（通常是404）
                 if (data.details === 'keyLoadError' || data.details === 'keyLoadTimeOut') {
                   keyErrorCount.current++;
@@ -203,10 +206,22 @@ export function LocalHlsPlayer({
                 // 处理清单加载错误
                 if (data.details === 'manifestLoadError') {
                   const is404 = data.response?.code === 404;
+                  const is403 = data.response?.code === 403;
+                  
+                  // 如果是403且还未尝试直接播放，尝试fallback
+                  if (is403 && !useDirectPlay) {
+                    console.log('🔄 代理被封锁，尝试直接播放模式...');
+                    setUseDirectPlay(true);
+                    setRetryCount(prev => prev + 1);
+                    return;
+                  }
+                  
                   const errorMsg = is404 
                     ? '视频文件不存在（404）'
+                    : is403
+                    ? '无法访问视频源，可能被地域封锁'
                     : `视频清单加载失败${data.response?.code ? ` (${data.response.code})` : ''}`;
-                  setPlayerError('manifest', errorMsg, !is404);
+                  setPlayerError('manifest', errorMsg, !is404 && !is403);
                   return;
                 }
 
@@ -371,7 +386,7 @@ export function LocalHlsPlayer({
         hlsRef.current = null;
       }
     };
-  }, [isClient, videoUrl, title, settings, getProxiedUrl, onProgress, onEnded, onError, setPlayerError, retryCount]);
+  }, [isClient, videoUrl, title, settings, getProxiedUrl, onProgress, onEnded, onError, setPlayerError, retryCount, useDirectPlay]);
 
   if (!isClient) {
     return (
@@ -396,6 +411,9 @@ export function LocalHlsPlayer({
           <div className="text-center">
             <div className="animate-spin rounded-full h-16 w-16 border-4 border-gray-700 border-t-red-600 mx-auto mb-4" />
             <p className="text-white text-lg">加载播放器中...</p>
+            {useDirectPlay && (
+              <p className="text-yellow-400 text-sm mt-2">正在使用直接播放模式...</p>
+            )}
           </div>
         </div>
       )}
