@@ -34,6 +34,20 @@ export function IframePlayer({
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const timeoutRef = useRef<NodeJS.Timeout | null>(null);
   const healthCheckRef = useRef<NodeJS.Timeout | null>(null);
+  const loadTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const isMountedRef = useRef<boolean>(true);
+  
+  // 使用 ref 保存回调，避免消息监听器频繁重新注册
+  const onProgressRef = useRef(onProgress);
+  const onEndedRef = useRef(onEnded);
+  const onPlayerSwitchRef = useRef(onPlayerSwitch);
+
+  // 更新回调 ref
+  useEffect(() => {
+    onProgressRef.current = onProgress;
+    onEndedRef.current = onEnded;
+    onPlayerSwitchRef.current = onPlayerSwitch;
+  });
 
   // 过滤启用的播放器并按优先级排序，如果视频源有专属播放器则添加到第一位
   const enabledPlayers = useMemo(() => {
@@ -67,12 +81,22 @@ export function IframePlayer({
     
     let checkCount = 0;
     healthCheckRef.current = setInterval(() => {
+      // 检查组件是否已卸载
+      if (!isMountedRef.current) {
+        if (healthCheckRef.current) {
+          clearInterval(healthCheckRef.current);
+          healthCheckRef.current = null;
+        }
+        return;
+      }
+      
       checkCount++;
       
       try {
         if (iframeRef.current?.contentWindow) {
           if (healthCheckRef.current) {
             clearInterval(healthCheckRef.current);
+            healthCheckRef.current = null;
           }
           setIsLoading(false);
         }
@@ -83,6 +107,7 @@ export function IframePlayer({
       if (checkCount > 20) {
         if (healthCheckRef.current) {
           clearInterval(healthCheckRef.current);
+          healthCheckRef.current = null;
         }
       }
     }, 500);
@@ -90,6 +115,8 @@ export function IframePlayer({
 
   // 切换到下一个播放器
   const tryNextPlayer = useCallback(() => {
+    if (!isMountedRef.current) return;
+    
     const maxAttempts = Math.min(enabledPlayers.length, 3); // 最多尝试3个播放器
     
     if (loadAttempts >= maxAttempts - 1) {
@@ -105,8 +132,8 @@ export function IframePlayer({
     }
     setLoadAttempts(prev => prev + 1);
     setIsLoading(true);
-    onPlayerSwitch?.(nextIndex);
-  }, [currentPlayerIndex, loadAttempts, enabledPlayers, onPlayerSwitch, externalPlayerIndex]);
+    onPlayerSwitchRef.current?.(nextIndex);
+  }, [currentPlayerIndex, loadAttempts, enabledPlayers.length, externalPlayerIndex]);
 
   // 超时检测
   useEffect(() => {
@@ -125,9 +152,14 @@ export function IframePlayer({
 
   // iframe加载完成
   const handleIframeLoad = useCallback(() => {
-    setTimeout(() => {
+    // 清理之前的加载定时器
+    if (loadTimerRef.current) clearTimeout(loadTimerRef.current);
+    
+    loadTimerRef.current = setTimeout(() => {
+      if (!isMountedRef.current) return;
       setIsLoading(false);
       if (timeoutRef.current) clearTimeout(timeoutRef.current);
+      loadTimerRef.current = null;
     }, 300);
 
     startHealthCheck();
@@ -146,8 +178,8 @@ export function IframePlayer({
     }
     setLoadAttempts(0);
     setIsLoading(true);
-    onPlayerSwitch?.(0);
-  }, [externalPlayerIndex, onPlayerSwitch]);
+    onPlayerSwitchRef.current?.(0);
+  }, [externalPlayerIndex]);
 
   // 监听外部索引变化
   useEffect(() => {
@@ -158,27 +190,56 @@ export function IframePlayer({
     }
   }, [externalPlayerIndex]);
 
-  // 清理
+  // 监听 vodSource 变化，重置状态
   useEffect(() => {
+    setPlayerError(false);
+    setLoadAttempts(0);
+    if (externalPlayerIndex === undefined) {
+      setInternalPlayerIndex(0);
+    }
+  }, [vodSource, externalPlayerIndex]);
+
+  // 设置 mounted 状态
+  useEffect(() => {
+    isMountedRef.current = true;
     return () => {
-      if (timeoutRef.current) clearTimeout(timeoutRef.current);
-      if (healthCheckRef.current) clearInterval(healthCheckRef.current);
+      isMountedRef.current = false;
     };
   }, []);
 
-  // 监听来自iframe的消息
+  // 清理所有定时器
+  useEffect(() => {
+    return () => {
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+        timeoutRef.current = null;
+      }
+      if (healthCheckRef.current) {
+        clearInterval(healthCheckRef.current);
+        healthCheckRef.current = null;
+      }
+      if (loadTimerRef.current) {
+        clearTimeout(loadTimerRef.current);
+        loadTimerRef.current = null;
+      }
+    };
+  }, []);
+
+  // 监听来自iframe的消息（使用 ref 避免频繁重新注册）
   useEffect(() => {
     const handleMessage = (event: MessageEvent) => {
+      if (!isMountedRef.current) return;
+      
       if (event.data.type === 'player:progress') {
-        onProgress?.(event.data.time);
+        onProgressRef.current?.(event.data.time);
       } else if (event.data.type === 'player:ended') {
-        onEnded?.();
+        onEndedRef.current?.();
       }
     };
 
     window.addEventListener('message', handleMessage);
     return () => window.removeEventListener('message', handleMessage);
-  }, [onProgress, onEnded]);
+  }, []);
 
   if (!currentPlayer) {
     return (
