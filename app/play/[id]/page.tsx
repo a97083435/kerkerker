@@ -7,7 +7,6 @@ import { UnifiedPlayer } from "@/components/player/UnifiedPlayer";
 import { SourceSelector } from "@/components/player/SourceSelector";
 import { PlayerSettingsPanel } from "@/components/player/PlayerSettingsPanel";
 import type { PlayerConfig } from "@/app/api/player-config/route";
-import Link from "next/link";
 import { ArrowLeft, X, ChevronLeft } from "lucide-react";
 
 interface AvailableSource {
@@ -341,15 +340,15 @@ export default function PlayPage() {
       {/* 顶部导航栏 - Netflix风格 */}
       <nav className="sticky top-0 z-450 bg-zinc-900/95 backdrop-blur-md border-b border-white/5">
         <div className="max-w-[1920px] mx-auto px-4 md:px-6 h-[48px] md:h-[64px] flex items-center justify-between">
-          <Link
-            href="/"
+          <button
+            onClick={() => router.back()}
             className="text-white text-lg font-bold flex items-center gap-2 hover:text-red-500 transition-all duration-300 group"
           >
             <div className="p-2 rounded-lg bg-white/5 group-hover:bg-red-500/10 transition-all duration-300">
               <ArrowLeft className="w-5 h-5" />
             </div>
-            <span className="hidden sm:inline">返回首页</span>
-          </Link>
+            <span className="hidden sm:inline">返回</span>
+          </button>
           <div className="flex items-center gap-3 md:gap-4">
             {/* 多源选择器 */}
             <SourceSelector

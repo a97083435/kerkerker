@@ -1,9 +1,62 @@
 'use client';
 
-import { useState, useEffect, useCallback, Suspense } from 'react';
+import { useState, useEffect, useCallback, Suspense, useTransition, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Drama } from '@/types/drama';
 import { VodSource } from '@/types/drama';
+
+// 缓存键
+const SEARCH_CACHE_KEY = 'search_results_cache';
+
+// 缓存数据结构
+interface SearchCache {
+  keyword: string;
+  results: (Drama & { source: VodSource })[];
+  stats: { total: number; bySource: Record<string, number> };
+  sources: VodSource[];
+  timestamp: number;
+}
+
+// 安全存储缓存
+function saveSearchCache(data: SearchCache): void {
+  try {
+    const json = JSON.stringify(data);
+    // 超过 5MB 不缓存
+    if (json.length > 5 * 1024 * 1024) {
+      console.log('搜索结果超过 5MB，跳过缓存');
+      return;
+    }
+    sessionStorage.setItem(SEARCH_CACHE_KEY, json);
+    console.log(`💾 搜索结果已缓存: ${data.results.length} 条`);
+  } catch (e) {
+    // 存储失败，静默降级
+    console.warn('缓存存储失败:', e);
+  }
+}
+
+// 读取缓存
+function loadSearchCache(keyword: string): SearchCache | null {
+  try {
+    const cached = sessionStorage.getItem(SEARCH_CACHE_KEY);
+    if (!cached) return null;
+    
+    const data: SearchCache = JSON.parse(cached);
+    
+    // 检查关键词是否匹配
+    if (data.keyword !== keyword) return null;
+    
+    // 检查缓存是否过期（30分钟）
+    if (Date.now() - data.timestamp > 30 * 60 * 1000) {
+      sessionStorage.removeItem(SEARCH_CACHE_KEY);
+      return null;
+    }
+    
+    console.log(`📦 使用缓存的搜索结果: ${data.results.length} 条`);
+    return data;
+  } catch {
+    return null;
+  }
+}
 
 function SearchContent() {
   const router = useRouter();
@@ -18,102 +71,117 @@ function SearchContent() {
   const [currentSource, setCurrentSource] = useState<VodSource | null>(null);
   const [searchStats, setSearchStats] = useState<{ total: number; bySource: Record<string, number> }>({ total: 0, bySource: {} });
   
+  // 流式搜索进度
+  const [searchProgress, setSearchProgress] = useState<{ completed: number; total: number }>({ completed: 0, total: 0 });
+  
+  // 使用 useTransition 让渲染不阻塞用户交互
+  const [isPending, startTransition] = useTransition();
+  
+  // 防止重复搜索
+  const searchingRef = useRef<string | null>(null);
+  
   // 同步 URL 参数到本地搜索框状态
   useEffect(() => {
     setSearchKeyword(queryKeyword);
   }, [queryKeyword]);
   
-  // 执行搜索 - 并行搜索所有视频源
-  const performSearch = useCallback(async (keyword: string, sourceKey?: string) => {
+  // 执行流式搜索 - 每个源完成就立即显示结果
+  const performSearch = useCallback(async (keyword: string) => {
     if (!keyword.trim()) return;
-    
-    // 检查是否有视频源
-    if (allSources.length === 0) {
-      setSearchResults([]);
-      setSearched(true);
-      return;
-    }
     
     setLoading(true);
     setSearched(true);
     setSearchResults([]);
+    setSearchStats({ total: 0, bySource: {} });
+    setSearchProgress({ completed: 0, total: 0 });
     
     try {
-      // 如果指定了 sourceKey，只搜索该源；否则搜索所有源
-      const sourcesToSearch = sourceKey 
-        ? allSources.filter(s => s.key === sourceKey)
-        : allSources;
+      console.log(`🔍 开始流式搜索: ${keyword}`);
       
-      if (sourcesToSearch.length === 0) {
-        setSearchResults([]);
-        setLoading(false);
-        return;
+      // 使用流式搜索 API
+      const response = await fetch(`/api/drama/search-stream?q=${encodeURIComponent(keyword.trim())}`);
+      
+      if (!response.ok) {
+        throw new Error('搜索请求失败');
       }
       
-      console.log(`🔍 开始搜索所有视频源 (${sourcesToSearch.length}个): ${keyword}`);
+      const reader = response.body?.getReader();
+      if (!reader) {
+        throw new Error('无法读取响应流');
+      }
       
-      // 并行搜索所有源
-      const searchPromises = sourcesToSearch.map(async (source) => {
-        try {
-          console.log(`  ⏳ 搜索源: ${source.name}...`);
-          const response = await fetch('/api/drama/list', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              source: source,
-              page: 1,
-              limit: 50,
-              keyword: keyword.trim(),
-            }),
-          });
-
-          const result = await response.json();
-          
-          if (result.code === 200 && result.data?.list) {
-            console.log(`  ✅ ${source.name} 找到 ${result.data.list.length} 个结果`);
-            // 为每个结果添加源信息
-            return result.data.list.map((drama: Drama) => ({
-              ...drama,
-              source: source,
-            }));
-          } else {
-            console.log(`  ❌ ${source.name} 未找到结果`);
-            return [];
+      const decoder = new TextDecoder();
+      let buffer = '';
+      
+      while (true) {
+        const { done, value } = await reader.read();
+        
+        if (done) break;
+        
+        buffer += decoder.decode(value, { stream: true });
+        
+        // 解析 SSE 数据
+        const lines = buffer.split('\n\n');
+        buffer = lines.pop() || ''; // 保留未完成的部分
+        
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            try {
+              const data = JSON.parse(line.slice(6));
+              
+              if (data.type === 'init') {
+                // 初始化：设置总源数和源列表
+                console.log(`📡 开始搜索 ${data.totalSources} 个视频源`);
+                setSearchProgress({ completed: 0, total: data.totalSources });
+                setAllSources(data.sources.map((s: { key: string; name: string }) => ({ 
+                  key: s.key, 
+                  name: s.name,
+                  api: '' // API URL 不需要在前端
+                })));
+              } else if (data.type === 'result') {
+                // 收到单个源的结果 - 立即追加显示
+                console.log(`  ✅ ${data.sourceName} 找到 ${data.count} 个结果`);
+                
+                startTransition(() => {
+                  setSearchResults(prev => [...prev, ...data.results]);
+                  setSearchStats(prev => ({
+                    total: prev.total + data.count,
+                    bySource: {
+                      ...prev.bySource,
+                      [data.sourceKey]: data.count,
+                    },
+                  }));
+                });
+                
+                setSearchProgress(prev => ({ 
+                  ...prev, 
+                  completed: prev.completed + 1 
+                }));
+              } else if (data.type === 'done') {
+                console.log('📊 所有视频源搜索完成');
+                
+                // 搜索完成后缓存结果
+                setSearchResults(currentResults => {
+                  setSearchStats(currentStats => {
+                    setAllSources(currentSources => {
+                      saveSearchCache({
+                        keyword,
+                        results: currentResults,
+                        stats: currentStats,
+                        sources: currentSources,
+                        timestamp: Date.now(),
+                      });
+                      return currentSources;
+                    });
+                    return currentStats;
+                  });
+                  return currentResults;
+                });
+              }
+            } catch (e) {
+              console.error('解析 SSE 数据失败:', e);
+            }
           }
-        } catch (error) {
-          console.error(`  ❌ ${source.name} 搜索失败:`, error);
-          return [];
-        }
-      });
-
-      // 等待所有搜索完成
-      const results = await Promise.all(searchPromises);
-      
-      // 合并所有结果
-      const allResults = results.flat();
-      
-      // 计算统计信息
-      const stats = {
-        total: allResults.length,
-        bySource: {} as Record<string, number>,
-      };
-      
-      allResults.forEach(result => {
-        const sourceKey = result.source.key;
-        stats.bySource[sourceKey] = (stats.bySource[sourceKey] || 0) + 1;
-      });
-      
-      console.log(`\n📊 搜索完成: 总共找到 ${allResults.length} 个结果`);
-      console.log('各源结果数:', stats.bySource);
-      
-      setSearchResults(allResults);
-      setSearchStats(stats);
-      
-      // 如果指定了源，设置当前源
-      if (sourceKey) {
-        const selectedSource = allSources.find(s => s.key === sourceKey);
-        if (selectedSource) {
-          setCurrentSource(selectedSource);
         }
       }
     } catch (error) {
@@ -122,7 +190,7 @@ function SearchContent() {
     } finally {
       setLoading(false);
     }
-  }, [allSources]);
+  }, [startTransition]);
 
   // 从数据库加载视频源配置
   useEffect(() => {
@@ -143,12 +211,28 @@ function SearchContent() {
     loadSources();
   }, []);
 
-  // 当视频源加载完成且有搜索关键词时，执行搜索
+  // 当搜索关键词变化时执行搜索
   useEffect(() => {
-    if (queryKeyword && allSources.length > 0) {
+    if (queryKeyword && searchingRef.current !== queryKeyword) {
+      searchingRef.current = queryKeyword;
+      
+      // 先检查缓存
+      const cached = loadSearchCache(queryKeyword);
+      if (cached) {
+        // 使用缓存结果
+        setSearchResults(cached.results);
+        setSearchStats(cached.stats);
+        setAllSources(cached.sources);
+        setSearchProgress({ completed: cached.sources.length, total: cached.sources.length });
+        setSearched(true);
+        setLoading(false);
+        return;
+      }
+      
+      // 无缓存，执行搜索
       performSearch(queryKeyword);
     }
-  }, [queryKeyword, allSources, performSearch]);
+  }, [queryKeyword, performSearch]);
 
   // 处理搜索提交
   const handleSearch = () => {
@@ -268,23 +352,45 @@ function SearchContent() {
               </a>
             </div>
           </div>
-        ) : loading ? (
+        ) : (loading && searchResults.length === 0) ? (
+          /* 初始加载状态 - 还没有任何结果 */
           <div className="flex items-center justify-center py-24 md:py-32">
             <div className="text-center animate-fade-in">
               <div className="animate-spin rounded-full h-12 w-12 md:h-16 md:w-16 border-4 border-gray-700 border-t-red-600 mx-auto mb-4" />
-              <p className="text-gray-300 text-base md:text-lg font-medium">正在搜索所有视频源...</p>
-              <p className="text-gray-500 text-xs md:text-sm mt-2">搜索 {allSources.length} 个视频源中</p>
+              <p className="text-gray-300 text-base md:text-lg font-medium">正在搜索视频源...</p>
+              {searchProgress.total > 0 && (
+                <p className="text-gray-500 text-xs md:text-sm mt-2">
+                  已完成 {searchProgress.completed}/{searchProgress.total} 个源
+                </p>
+              )}
             </div>
           </div>
-        ) : searched ? (
+        ) : searched || searchResults.length > 0 ? (
           searchResults.length > 0 ? (
             <div className="animate-fade-in">
               <div className="mb-6 md:mb-8">
-                <h2 className="text-xl md:text-2xl lg:text-3xl font-bold text-white mb-2">
+                <h2 className="text-xl md:text-2xl lg:text-3xl font-bold text-white mb-2 flex items-center gap-3">
                   搜索结果
+                  {/* 搜索进行中指示器 */}
+                  {loading && (
+                    <span className="inline-flex items-center gap-2 text-sm font-normal text-gray-400 bg-gray-800/50 px-3 py-1 rounded-full">
+                      <span className="w-3 h-3 border-2 border-gray-600 border-t-red-500 rounded-full animate-spin" />
+                      {searchProgress.completed}/{searchProgress.total}
+                    </span>
+                  )}
+                  {isPending && !loading && (
+                    <span className="inline-flex items-center gap-2 text-sm font-normal text-gray-400">
+                      <span className="w-4 h-4 border-2 border-gray-600 border-t-red-500 rounded-full animate-spin" />
+                      渲染中...
+                    </span>
+                  )}
                 </h2>
                 <p className="text-gray-400 text-xs md:text-sm mb-2">
-                  在 <span className="text-red-500 font-semibold">{allSources.length} 个视频源</span> 中找到 <span className="text-white font-semibold">{searchResults.length}</span> 个结果
+                  {loading ? (
+                    <>正在搜索 <span className="text-red-500 font-semibold">{searchProgress.total} 个视频源</span>，已找到 <span className="text-white font-semibold">{searchResults.length}</span> 个结果</>
+                  ) : (
+                    <>在 <span className="text-red-500 font-semibold">{searchProgress.total || allSources.length} 个视频源</span> 中找到 <span className="text-white font-semibold">{searchResults.length}</span> 个结果</>
+                  )}
                   {queryKeyword && <> · 关键词: <span className="text-white font-medium">&ldquo;{queryKeyword}&rdquo;</span></>}
                 </p>
                 {/* 各源结果统计 */}
@@ -305,14 +411,14 @@ function SearchContent() {
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7 gap-3 md:gap-4 lg:gap-5">
                 {searchResults
                   .filter(drama => !currentSource || drama.source.key === currentSource.key)
-                  .map((drama) => (
+                  .map((drama, index) => (
                   <div
-                    key={`${drama.source.key}-${drama.id}`}
+                    key={`${drama.source.key}-${drama.id}-${index}`}
                     onClick={() => handlePlayClick(drama)}
                     className="group cursor-pointer transition-all duration-300 hover:scale-105 hover:z-10"
                   >
                     {/* 封面 */}
-                    <div className="relative aspect-[2/3] bg-gray-900 rounded-lg overflow-hidden mb-2 md:mb-3 shadow-lg group-hover:shadow-2xl transition-shadow">
+                    <div className="relative aspect-2/3 bg-gray-900 rounded-lg overflow-hidden mb-2 md:mb-3 shadow-lg group-hover:shadow-2xl transition-shadow">
                       {drama.pic ? (
                         <img
                           src={drama.pic}
@@ -329,7 +435,7 @@ function SearchContent() {
                       )}
                       
                       {/* 悬停遮罩 */}
-                      <div className="absolute inset-0 bg-gradient-to-t from-black via-black/50 to-transparent opacity-0 group-hover:opacity-100 transition-all duration-300 flex items-center justify-center">
+                      <div className="absolute inset-0 bg-linear-to-t from-black via-black/50 to-transparent opacity-0 group-hover:opacity-100 transition-all duration-300 flex items-center justify-center">
                         <div className="text-center transform scale-75 group-hover:scale-100 transition-transform duration-300">
                           <div className="w-12 h-12 md:w-14 md:h-14 bg-white/20 backdrop-blur-sm rounded-full flex items-center justify-center mb-2 mx-auto border-2 border-white/30">
                             <svg className="w-6 h-6 md:w-7 md:h-7 text-white ml-1" fill="currentColor" viewBox="0 0 20 20">
