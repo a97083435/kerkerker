@@ -26,6 +26,19 @@ body {
   overflow-x: hidden;
 }
 
+/* 可点击元素默认指针样式 */
+button,
+[role="button"],
+a,
+select,
+input[type="checkbox"],
+input[type="radio"],
+input[type="submit"],
+input[type="button"],
+label[for] {
+  cursor: pointer;
+}
+
 /* 隐藏滚动条但保持可滚动 */
 .scrollbar-hide {
   -ms-overflow-style: none;

@@ -10,6 +10,13 @@ export const presetVodSources: VodSource[] = [
     type: "json",
   },
   {
+    key: "liangzizy",
+    name: "量子资源",
+    api: "https://cj.lziapi.com/api.php/provide/vod",
+    playUrl: "https://lziplayer.com/?url=",
+    type: "json",
+  },
+  {
     key: "hongniuzy",
     name: "红牛资源",
     api: "https://www.hongniuzy2.com/api.php/provide/vod/from/hnm3u8",
