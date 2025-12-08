@@ -67,6 +67,10 @@ export function HeroBanner({ heroMovies, heroDataList, onMovieClick }: HeroBanne
                 <img
                   src={getImageUrl(heroData.poster_vertical)}
                   alt={movie.title}
+                  // 首张图片优先加载，其他懒加载
+                  loading={index === 0 ? "eager" : "lazy"}
+                  fetchPriority={index === 0 ? "high" : "auto"}
+                  decoding="async"
                   className="block md:hidden w-full h-full object-cover"
                 />
 
@@ -74,6 +78,10 @@ export function HeroBanner({ heroMovies, heroDataList, onMovieClick }: HeroBanne
                 <img
                   src={getImageUrl(heroData.poster_horizontal)}
                   alt={movie.title}
+                  // 首张图片优先加载，其他懒加载
+                  loading={index === 0 ? "eager" : "lazy"}
+                  fetchPriority={index === 0 ? "high" : "auto"}
+                  decoding="async"
                   className="hidden md:block w-full h-full object-cover object-top"
                 />
 
@@ -185,44 +193,54 @@ export function HeroBanner({ heroMovies, heroDataList, onMovieClick }: HeroBanne
   );
 }
 
-// Hero Banner 骨架屏组件
+// Hero Banner 骨架屏组件 - 使用与实际组件相同的宽高比
 function HeroBannerSkeleton() {
   return (
-    <div className="relative w-full aspect-9/16 md:aspect-video overflow-hidden bg-linear-to-br from-gray-900 via-gray-800 to-black animate-pulse">
+    <div className="relative w-full aspect-3/4 md:aspect-12/5 overflow-hidden bg-black">
+      {/* 动态渐变背景 */}
+      <div className="absolute inset-0 bg-linear-to-br from-gray-900 via-gray-800 to-black">
+        {/* 微光扫描效果 */}
+        <div className="absolute inset-0 bg-linear-to-r from-transparent via-white/5 to-transparent animate-shimmer" 
+             style={{ backgroundSize: '200% 100%' }} />
+      </div>
+      
       {/* 渐变遮罩 */}
-      <div className="absolute inset-0 bg-linear-to-t md:bg-linear-to-r from-black/95 via-black/70 md:via-black/50 to-transparent" />
-      <div className="absolute inset-0 bg-linear-to-t from-black/90 via-transparent to-transparent" />
+      <div className="absolute inset-0 bg-linear-to-t from-black via-black/60 to-transparent opacity-90" />
+      <div className="absolute inset-0 bg-linear-to-r from-black/80 via-black/40 to-transparent hidden md:block" />
       
       {/* 内容骨架 */}
       <div className="absolute inset-0 flex items-end">
-        <div className="w-full px-4 md:px-12 pb-8 md:pb-12 lg:pb-24">
+        <div className="w-full px-4 md:px-12 lg:px-16 pb-20 md:pb-24">
           <div className="max-w-3xl space-y-4">
             {/* 标题骨架 */}
-            <div className="h-12 md:h-16 bg-gray-700/50 rounded-lg w-3/4 animate-pulse" />
+            <div className="h-10 md:h-14 lg:h-16 bg-white/10 rounded-lg w-2/3 animate-pulse" />
             
             {/* 标签骨架 */}
-            <div className="flex gap-2">
-              <div className="h-6 w-16 bg-gray-700/50 rounded-full animate-pulse" />
-              <div className="h-6 w-20 bg-gray-700/50 rounded-full animate-pulse" />
-              <div className="h-6 w-24 bg-gray-700/50 rounded-full animate-pulse" />
+            <div className="flex flex-wrap gap-2 md:gap-3">
+              <div className="h-7 w-14 bg-white/10 rounded-full animate-pulse" />
+              <div className="h-7 w-20 bg-white/10 rounded-full animate-pulse" />
+              <div className="h-7 w-16 bg-white/10 rounded-full animate-pulse" />
             </div>
             
             {/* 描述骨架 */}
-            <div className="hidden md:block space-y-2">
-              <div className="h-4 bg-gray-700/50 rounded w-full animate-pulse" />
-              <div className="h-4 bg-gray-700/50 rounded w-5/6 animate-pulse" />
+            <div className="hidden md:block space-y-2 mt-4">
+              <div className="h-4 bg-white/10 rounded w-full max-w-xl animate-pulse" />
+              <div className="h-4 bg-white/10 rounded w-4/5 max-w-lg animate-pulse" />
             </div>
             
             {/* 按钮骨架 */}
-            <div className="h-12 w-36 bg-gray-700/50 rounded-lg animate-pulse" />
+            <div className="flex gap-3 mt-6">
+              <div className="h-12 w-32 bg-white/20 rounded-lg animate-pulse" />
+              <div className="h-12 w-12 bg-white/10 rounded-lg animate-pulse hidden md:block" />
+            </div>
           </div>
         </div>
       </div>
       
       {/* 指示器骨架 */}
-      <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex gap-2">
+      <div className="absolute bottom-6 md:bottom-8 left-1/2 -translate-x-1/2 flex gap-2">
         {[...Array(5)].map((_, i) => (
-          <div key={i} className="w-2 h-2 bg-gray-700/50 rounded-full animate-pulse" />
+          <div key={i} className={`w-2 h-2 rounded-full animate-pulse ${i === 0 ? 'bg-white/40 w-6' : 'bg-white/20'}`} />
         ))}
       </div>
     </div>

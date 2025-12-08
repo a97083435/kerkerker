@@ -7,9 +7,11 @@ import { DoubanMovie } from '@/types/douban';
 interface DoubanCardProps {
   movie: DoubanMovie;
   onSelect: (movie: DoubanMovie) => void;
+  /** 是否为首屏可见卡片，优先加载 */
+  priority?: boolean;
 }
 
-export default function DoubanCard({ movie, onSelect }: DoubanCardProps) {
+export default function DoubanCard({ movie, onSelect, priority = false }: DoubanCardProps) {
   const [imageError, setImageError] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
  
@@ -27,6 +29,12 @@ export default function DoubanCard({ movie, onSelect }: DoubanCardProps) {
           <img
             src={imageUrl}
             alt={movie.title}
+            // 非首屏图片使用懒加载，不阻塞 hydration
+            loading={priority ? "eager" : "lazy"}
+            // 首屏图片优先加载
+            fetchPriority={priority ? "high" : "auto"}
+            // 提供尺寸提示，避免布局偏移
+            decoding="async"
             className={`w-full h-full object-cover transition-opacity duration-300 ${
               isLoading ? 'opacity-0' : 'opacity-100'
             }`}

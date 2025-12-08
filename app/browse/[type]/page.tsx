@@ -20,6 +20,8 @@ import {
 } from "lucide-react";
 import DoubanCard from "@/components/DoubanCard";
 import { DoubanMovie } from "@/types/douban";
+import { useMovieMatch } from "@/hooks/useMovieMatch";
+import { Toast } from "@/components/Toast";
 
 // ============ 页面配置 ============
 interface PageConfig {
@@ -177,17 +179,26 @@ export default function BrowsePage() {
 
   const config = PAGE_CONFIG[pageType] || PAGE_CONFIG.movies;
 
+  // 使用影片点击 hook（与首页一致，点击后跳转详情页）
+  const { handleMovieClick, toast, setToast } = useMovieMatch();
+
   // 数据状态
   const [categories, setCategories] = useState<CategoryData[]>([]);
-  const [movies, setMovies] = useState<NewApiMovie[]>([]);
+  const [allMovies, setAllMovies] = useState<NewApiMovie[]>([]); // 全部数据
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [matchingMovie, setMatchingMovie] = useState<string | null>(null);
 
   // 分页状态
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
+  const [useServerPagination, setUseServerPagination] = useState(false); // 是否使用服务端分页
+  const ITEMS_PER_PAGE = 30;
+
+  // 客户端分页：根据当前页显示的电影
+  const movies = useServerPagination 
+    ? allMovies 
+    : allMovies.slice(0, page * ITEMS_PER_PAGE);
 
   // 筛选状态
   const [filters, setFilters] = useState<Filters>({
@@ -216,20 +227,24 @@ export default function BrowsePage() {
     is_new: (item.is_new as boolean) || false,
   });
 
-  // 获取数据
+  // 获取数据（只负责网络请求，不处理客户端分页逻辑）
   const fetchData = useCallback(async (pageNum: number = 1, append: boolean = false) => {
+    const hasActiveFilters = filters.genre || filters.year || filters.region || filters.sort;
+    
     if (append) {
       setLoadingMore(true);
     } else {
       setLoading(true);
-      setMovies([]);
+      setAllMovies([]);
     }
     setError(null);
     
     try {
       let url = config.api;
 
-      if (config.hasFilters) {
+      if (config.hasFilters && hasActiveFilters) {
+        // 有筛选条件时使用服务端分页
+        setUseServerPagination(true);
         const searchParams = new URLSearchParams();
         if (filters.genre) searchParams.append("genre", filters.genre);
         if (filters.year) searchParams.append("year", filters.year);
@@ -243,8 +258,11 @@ export default function BrowsePage() {
           searchParams.append("sort", sortMap[filters.sort] || "recommend");
         }
         searchParams.append("page", String(pageNum));
-        searchParams.append("pageSize", "30");
+        searchParams.append("pageSize", String(ITEMS_PER_PAGE));
         url = `${config.api}?${searchParams.toString()}`;
+      } else {
+        // 无筛选条件时使用客户端分页
+        setUseServerPagination(false);
       }
 
       const response = await fetch(url);
@@ -258,23 +276,28 @@ export default function BrowsePage() {
         if (config.hasCategories) {
           setCategories(result.data);
         } else {
-          const allMovies = result.data.flatMap(
+          const fetchedMovies = result.data.flatMap(
             (cat: CategoryData) => cat.data || []
           );
-          if (append) {
-            setMovies(prev => {
-              const existingIds = new Set(prev.map(m => m.id));
-              const newMovies = allMovies.filter((m: NewApiMovie) => !existingIds.has(m.id));
+          
+          if (append && hasActiveFilters) {
+            // 服务端分页：追加新数据
+            setAllMovies((prev: NewApiMovie[]) => {
+              const existingIds = new Set(prev.map((m: NewApiMovie) => m.id));
+              const newMovies = fetchedMovies.filter((m: NewApiMovie) => !existingIds.has(m.id));
               return [...prev, ...newMovies];
             });
           } else {
-            setMovies(allMovies);
+            // 首次加载或重置
+            setAllMovies(fetchedMovies);
           }
+          
           // 更新分页状态
           if (result.pagination) {
             setHasMore(result.pagination.hasMore);
           } else {
-            setHasMore(allMovies.length >= 30);
+            // 客户端分页：检查是否还有更多数据可显示
+            setHasMore(fetchedMovies.length > ITEMS_PER_PAGE);
           }
         }
       }
@@ -298,58 +321,14 @@ export default function BrowsePage() {
     if (!loadingMore && hasMore) {
       const nextPage = page + 1;
       setPage(nextPage);
-      fetchData(nextPage, true);
-    }
-  };
-
-  // 点击影片
-  const handleMovieClick = async (movie: DoubanMovie) => {
-    setMatchingMovie(movie.id);
-    try {
-      const response = await fetch("/api/douban/match-vod", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          douban_id: movie.id,
-          title: movie.title,
-        }),
-      });
-
-      const result = await response.json();
-
-      if (
-        result.code === 200 &&
-        result.data?.matches &&
-        result.data.matches.length > 0
-      ) {
-        const matches = result.data.matches;
-
-        localStorage.setItem(
-          "multi_source_matches",
-          JSON.stringify({
-            douban_id: movie.id,
-            title: movie.title,
-            matches: matches,
-            timestamp: Date.now(),
-          })
-        );
-
-        const firstMatch = matches[0];
-        router.push(
-          `/play/${firstMatch.vod_id}?source=${firstMatch.source_key}&multi=true`
-        );
+      
+      // 客户端分页时直接更新 hasMore 状态
+      if (!useServerPagination) {
+        const nextDisplayCount = nextPage * ITEMS_PER_PAGE;
+        setHasMore(nextDisplayCount < allMovies.length);
       } else {
-        alert(
-          `未在任何播放源中找到《${movie.title}》\n\n已搜索 ${
-            result.data?.total_sources || 9
-          } 个视频源`
-        );
+        fetchData(nextPage, true);
       }
-    } catch (err) {
-      console.error("搜索播放源失败:", err);
-      alert("搜索播放源时出错，请重试");
-    } finally {
-      setMatchingMovie(null);
     }
   };
 
@@ -580,17 +559,13 @@ export default function BrowsePage() {
         )}
       </div>
 
-      {/* 匹配中遮罩 */}
-      {matchingMovie && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center">
-          <div className="text-center">
-            <div className="animate-spin rounded-full h-16 w-16 border-4 border-gray-700 border-t-red-600 mx-auto mb-4" />
-            <p className="text-white text-lg">正在匹配播放源...</p>
-            <p className="text-gray-400 text-sm mt-2">
-              正在搜索所有可用播放源
-            </p>
-          </div>
-        </div>
+      {/* Toast 提示 */}
+      {toast && (
+        <Toast
+          message={toast.message}
+          type={toast.type}
+          onClose={() => setToast(null)}
+        />
       )}
     </div>
   );

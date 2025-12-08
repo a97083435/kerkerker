@@ -161,3 +161,17 @@ label[for] {
 .animate-scale-in {
   animation: scale-in 0.2s ease-out;
 }
+
+/* Shimmer 骨架屏动画 */
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.animate-shimmer {
+  animation: shimmer 2s infinite linear;
+}

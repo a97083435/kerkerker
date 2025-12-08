@@ -1,10 +1,9 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, startTransition } from "react";
 import type { DoubanMovie } from "@/types/douban";
 import type { CategoryData, HeroData, HeroMovie } from "@/types/home";
 
 interface UseHomeDataReturn {
   categories: CategoryData[];
-  top250Movies: DoubanMovie[];
   heroMovies: DoubanMovie[];
   heroDataList: HeroData[];
   loading: boolean;
@@ -14,10 +13,10 @@ interface UseHomeDataReturn {
 
 /**
  * 管理首页数据加载
+ * 采用串行加载策略，优先加载用户最先看到的内容
  */
 export function useHomeData(): UseHomeDataReturn {
   const [categories, setCategories] = useState<CategoryData[]>([]);
-  const [top250Movies, setTop250Movies] = useState<DoubanMovie[]>([]);
   const [heroMovies, setHeroMovies] = useState<DoubanMovie[]>([]);
   const [heroDataList, setHeroDataList] = useState<HeroData[]>([]);
   const [loading, setLoading] = useState(true);
@@ -28,22 +27,10 @@ export function useHomeData(): UseHomeDataReturn {
     setError(null);
     
     try {
-      // 并行加载 Hero、新 API 数据和 Top250
-      const [heroRes, newApiRes, top250Res] = await Promise.all([
-        fetch("/api/douban/hero"),
-        fetch("/api/douban/new"),
-        fetch("/api/douban/250"),
-      ]);
-
-      if (!heroRes.ok || !newApiRes.ok || !top250Res.ok) {
-        throw new Error("数据加载失败");
-      }
-
-      const [heroApiData, newApiData, top250Data] = await Promise.all([
-        heroRes.json(),
-        newApiRes.json(),
-        top250Res.json(),
-      ]);
+      // 1️⃣ 优先加载 Hero Banner（用户第一眼看到）
+      const heroRes = await fetch("/api/douban/hero");
+      if (!heroRes.ok) throw new Error("Hero数据加载失败");
+      const heroApiData = await heroRes.json();
 
       // 处理 Hero Banner 数据（现在是数组）
       if (heroApiData.code === 200 && heroApiData.data && Array.isArray(heroApiData.data)) {
@@ -86,20 +73,25 @@ export function useHomeData(): UseHomeDataReturn {
 
         setHeroMovies(heroMoviesList);
         setHeroDataList(heroDataArray);
+        
+        // Hero 加载完成后，立即结束 loading 状态，让用户可以交互
+        setLoading(false);
       }
 
-      // 处理新 API 数据（9个分类）
-      if (newApiData.code === 200 && newApiData.data) {
-        setCategories(newApiData.data);
+      // 2️⃣ 加载分类数据（用户滚动后看到）
+      const newApiRes = await fetch("/api/douban/new");
+      if (newApiRes.ok) {
+        const newApiData = await newApiRes.json();
+        if (newApiData.code === 200 && newApiData.data) {
+          // 使用 startTransition 让 UI 更新不阻塞交互
+          startTransition(() => {
+            setCategories(newApiData.data);
+          });
+        }
       }
 
-      // 处理 Top250 数据
-      if (top250Data.code === 200 && top250Data.data?.subjects) {
-        setTop250Movies(top250Data.data.subjects);
-      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "数据加载失败，请稍后重试");
-    } finally {
       setLoading(false);
     }
   }, []);
@@ -110,7 +102,6 @@ export function useHomeData(): UseHomeDataReturn {
 
   return {
     categories,
-    top250Movies,
     heroMovies,
     heroDataList,
     loading,

@@ -35,7 +35,7 @@ interface HeroMovie {
 }
 
 // Redis 缓存配置
-const cache = createCache(3600); // 缓存1小时
+const cache = createCache(86400); // 缓存1天
 const CACHE_KEY = 'douban:hero:movies';
 
 export async function GET() {

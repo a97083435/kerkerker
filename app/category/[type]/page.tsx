@@ -17,6 +17,8 @@ import {
 } from "lucide-react";
 import DoubanCard from "@/components/DoubanCard";
 import { DoubanMovie } from "@/types/douban";
+import { useMovieMatch } from "@/hooks/useMovieMatch";
+import { Toast } from "@/components/Toast";
 
 // URL 路径到分类配置的映射
 const CATEGORY_CONFIG: Record<
@@ -135,11 +137,13 @@ export default function CategoryPage() {
   const params = useParams();
   const categoryType = params.type as string;
 
+  // 使用影片点击 hook（与首页一致，点击后跳转详情页）
+  const { handleMovieClick, toast, setToast } = useMovieMatch();
+
   const [movies, setMovies] = useState<DoubanMovie[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [matchingMovie, setMatchingMovie] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
   const loadMoreRef = useRef<HTMLDivElement>(null);
@@ -241,59 +245,6 @@ export default function CategoryPage() {
   useEffect(() => {
     fetchCategoryData();
   }, [fetchCategoryData]);
-
-  // 点击影片 - 搜索所有VOD播放源
-  const handleMovieClick = async (movie: DoubanMovie) => {
-    setMatchingMovie(movie.id);
-    try {
-      const response = await fetch("/api/douban/match-vod", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          douban_id: movie.id,
-          title: movie.title,
-        }),
-      });
-
-      const result = await response.json();
-
-      if (
-        result.code === 200 &&
-        result.data?.matches &&
-        result.data.matches.length > 0
-      ) {
-        const matches = result.data.matches;
-
-        // 将所有匹配结果存储到localStorage
-        localStorage.setItem(
-          "multi_source_matches",
-          JSON.stringify({
-            douban_id: movie.id,
-            title: movie.title,
-            matches: matches,
-            timestamp: Date.now(),
-          })
-        );
-
-        // 跳转到第一个匹配源的播放页
-        const firstMatch = matches[0];
-        router.push(
-          `/play/${firstMatch.vod_id}?source=${firstMatch.source_key}&multi=true`
-        );
-      } else {
-        alert(
-          `未在任何播放源中找到《${movie.title}》\n\n已搜索 ${
-            result.data?.total_sources || 9
-          } 个视频源\n建议：尝试使用其他关键词搜索`
-        );
-      }
-    } catch (err) {
-      console.error("搜索播放源失败:", err);
-      alert("搜索播放源时出错，请重试");
-    } finally {
-      setMatchingMovie(null);
-    }
-  };
 
   const goBack = () => {
     router.push("/");
@@ -466,15 +417,13 @@ export default function CategoryPage() {
         )}
       </div>
 
-      {/* 匹配中遮罩 */}
-      {matchingMovie && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center">
-          <div className="text-center">
-            <div className="animate-spin rounded-full h-16 w-16 border-4 border-gray-700 border-t-red-600 mx-auto mb-4" />
-            <p className="text-white text-lg">正在匹配播放源...</p>
-            <p className="text-gray-400 text-sm mt-2">正在搜索所有可用播放源</p>
-          </div>
-        </div>
+      {/* Toast 提示 */}
+      {toast && (
+        <Toast
+          message={toast.message}
+          type={toast.type}
+          onClose={() => setToast(null)}
+        />
       )}
     </div>
   );
