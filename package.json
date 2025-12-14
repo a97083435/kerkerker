@@ -8,9 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "docker:dev": "bash scripts/dev.sh",
-    "docker:prod": "bash scripts/prod.sh",
-    "docker:stop": "bash scripts/stop.sh",
-    "server:deploy": "bash scripts/deploy-server.sh"
+    "docker:prod": "bash scripts/prod.sh"
   },
   "dependencies": {
     "@octokit/rest": "^22.0.1",
