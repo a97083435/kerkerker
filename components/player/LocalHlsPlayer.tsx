@@ -162,17 +162,31 @@ export function LocalHlsPlayer({
         // HLS配置
         const hlsConfig = {
           debug: false,
-          enableWorker: true,
-          lowLatencyMode: false,
-          backBufferLength: 90,
-          maxBufferLength: 30,
-          maxMaxBufferLength: 60,
-          fragLoadingMaxRetry: 2, // 减少片段重试次数
-          fragLoadingMaxRetryTimeout: 10000, // 减少超时时间
-          manifestLoadingMaxRetry: 2, // 减少清单重试次数
+          enableWorker: true,           // WebWorker解码，降低主线程压力
+          lowLatencyMode: true,         // 低延迟模式，减少播放延迟
+          
+          /* 缓冲配置 - 关键参数 */
+          maxBufferLength: 30,          // 前向缓冲最大30秒
+          backBufferLength: 30,         // 保留30秒已播放内容，避免内存占用过大
+          maxBufferSize: 60 * 1000 * 1000, // 约60MB缓冲，超出后触发清理
+          maxMaxBufferLength: 600,      // 最大缓冲长度
+          
+          /* 重试配置 */
+          fragLoadingMaxRetry: 3,       // 片段加载重试次数
+          fragLoadingMaxRetryTimeout: 8000,
+          manifestLoadingMaxRetry: 3,   // 清单加载重试次数
           manifestLoadingMaxRetryTimeout: 10000,
-          levelLoadingMaxRetry: 2,
+          levelLoadingMaxRetry: 3,
           levelLoadingMaxRetryTimeout: 10000,
+          
+          /* 起始加载配置 */
+          startLevel: -1,               // 自动选择起始质量
+          startFragPrefetch: true,      // 预加载第一个片段
+          
+          /* ABR(自适应比特率)配置 */
+          abrEwmaDefaultEstimate: 500000, // 默认带宽估计500kbps
+          abrBandWidthFactor: 0.95,     // 带宽因子
+          abrBandWidthUpFactor: 0.7,    // 升档因子
         };
 
         // 创建ArtPlayer实例
